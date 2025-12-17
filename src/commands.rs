@@ -217,7 +217,6 @@ impl Command {
             Command::AclWhoami => "acl whoami",
             Command::AclGetuser(_) => "acl getuser",
             Command::AclSetuser(_, _) => "acl setuser",
-            Command::AclSetuser(_, _) => "acl setuser",
             Command::Auth(_, _) => "auth",
         }
     }
