@@ -70,6 +70,7 @@ pub(crate) enum Command {
     AclWhoami,
     AclGetuser(String /* User */),
     AclSetuser(String /* User */, String /* Password */),
+    Auth(String /* User */, String /* Password */),
     // ---
     Unknown(String),
 }
@@ -165,6 +166,7 @@ impl Command {
             Command::AclWhoami => false,
             Command::AclGetuser(_) => false,
             Command::AclSetuser(_, _) => false,
+            Command::Auth(_, _) => false,
         }
     }
 
@@ -215,6 +217,8 @@ impl Command {
             Command::AclWhoami => "acl whoami",
             Command::AclGetuser(_) => "acl getuser",
             Command::AclSetuser(_, _) => "acl setuser",
+            Command::AclSetuser(_, _) => "acl setuser",
+            Command::Auth(_, _) => "auth",
         }
     }
 

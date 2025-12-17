@@ -824,6 +824,21 @@ impl Engine {
                 RespValue::SimpleString("OK".into())
             }
 
+            Command::Auth(user, password) => match self.users.read().await.get(user) {
+                Some(user) => {
+                    if &user.password == password {
+                        RespValue::SimpleString("OK".into())
+                    } else {
+                        RespValue::SimpleError(
+                            "WRONGPASS invalid username-password pair or user is disabled.".into(),
+                        )
+                    }
+                }
+                None => RespValue::SimpleError(
+                    "WRONGPASS invalid username-password pair or user is disabled.".into(),
+                ),
+            },
+
             Command::Unknown(msg) => {
                 RespValue::SimpleError(format!("Unrecognized command: {}", msg))
             }

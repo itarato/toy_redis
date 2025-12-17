@@ -601,6 +601,16 @@ impl CommandParser {
                                 }
                             }
                         }
+
+                        return Ok(Command::Unknown(name.to_lowercase()));
+                    }
+
+                    if name.to_lowercase() == "auth" {
+                        Self::assert_argument_count(&items, 3, "auth")?;
+                        return Ok(Command::Auth(
+                            Self::get_string(&items[1], "auth")?,
+                            Self::get_string(&items[2], "auth")?,
+                        ));
                     }
 
                     return Ok(Command::Unknown(name.to_lowercase()));
@@ -617,6 +627,21 @@ impl CommandParser {
             "ERR wrong value type for '{}' command",
             command_name
         ))
+    }
+
+    fn assert_argument_count(
+        values: &Vec<RespValue>,
+        count: usize,
+        command: &str,
+    ) -> Result<(), String> {
+        if values.len() != count {
+            return Err(format!(
+                "ERR wrong number of arguments for '{}' command",
+                command
+            ));
+        }
+
+        Ok(())
     }
 
     fn get_strings_exact(
