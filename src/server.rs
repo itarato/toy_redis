@@ -68,6 +68,8 @@ impl Server {
         engine: Arc<Engine>,
         request_count: u64,
     ) -> Result<(), Error> {
+        engine.connection_established(request_count).await;
+
         loop {
             let mut stream_reader = StreamReader::new(&mut stream);
             match stream_reader
@@ -89,7 +91,10 @@ impl Server {
                             .context("write-simple-value-back-to-stream")?;
                     }
                 },
-                None => break,
+                None => {
+                    engine.connection_terminated(request_count).await;
+                    break;
+                }
             }
         }
 

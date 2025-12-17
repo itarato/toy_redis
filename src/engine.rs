@@ -56,6 +56,7 @@ pub(crate) struct Engine {
     subscriptions: RwLock<HashMap<u64, HashMap<String, VecDeque<String>>>>,
     subscription_notify: Notify,
     users: RwLock<HashMap<String, User>>,
+    authentications: RwLock<HashMap<u64, String>>,
 }
 
 impl Engine {
@@ -85,6 +86,7 @@ impl Engine {
             subscriptions: RwLock::new(HashMap::new()),
             subscription_notify: Notify::new(),
             users: RwLock::new(HashMap::new()),
+            authentications: RwLock::new(HashMap::new()),
         }
     }
 
@@ -262,12 +264,44 @@ impl Engine {
         Ok(())
     }
 
+    pub(crate) async fn connection_terminated(&self, request_count: u64) {
+        self.authentications.write().await.remove(&request_count);
+    }
+
+    pub(crate) async fn connection_established(&self, request_count: u64) {
+        if !self.users.read().await.contains_key("default") {
+            self.authentications
+                .write()
+                .await
+                .insert(request_count, "default".into());
+        }
+    }
+
+    pub(crate) async fn ensure_auth(&self, request_count: u64, command: &Command) -> bool {
+        command.is_auth()
+            || self
+                .authentications
+                .read()
+                .await
+                .contains_key(&request_count)
+    }
+
     pub(crate) async fn execute(
         &self,
         command: &Command,
         request_count: u64,
         stream_reader: &mut StreamReader<'_>,
     ) -> Result<(), Error> {
+        if !self.ensure_auth(request_count, command).await {
+            stream_reader
+                .get_mut()
+                .write_all(
+                    &RespValue::SimpleError("NOAUTH Authentication required.".into()).serialize(),
+                )
+                .await?;
+            return Ok(());
+        }
+
         if !command.is_exec() && !command.is_discard() && self.is_transaction(request_count).await {
             if command.is_multi() {
                 stream_reader
@@ -824,9 +858,13 @@ impl Engine {
                 RespValue::SimpleString("OK".into())
             }
 
-            Command::Auth(user, password) => match self.users.read().await.get(user) {
+            Command::Auth(username, password) => match self.users.read().await.get(username) {
                 Some(user) => {
                     if &user.password == password {
+                        self.authentications
+                            .write()
+                            .await
+                            .insert(request_count.unwrap(), username.clone());
                         RespValue::SimpleString("OK".into())
                     } else {
                         RespValue::SimpleError(

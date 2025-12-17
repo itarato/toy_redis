@@ -118,6 +118,13 @@ impl Command {
         }
     }
 
+    pub(crate) fn is_auth(&self) -> bool {
+        match self {
+            Command::Auth(_, _) => true,
+            _ => false,
+        }
+    }
+
     pub(crate) fn for_replication(&self) -> bool {
         match self {
             Command::Set(_, _, _) => true,
