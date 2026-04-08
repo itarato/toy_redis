@@ -91,6 +91,13 @@ impl Command {
         }
     }
 
+    pub(crate) fn is_watch(&self) -> bool {
+        match self {
+            Command::Watch(_) => true,
+            _ => false,
+        }
+    }
+
     pub(crate) fn is_discard(&self) -> bool {
         match self {
             Command::Discard => true,

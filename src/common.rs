@@ -1,6 +1,4 @@
 use crate::commands::Command;
-use rand::rng;
-use rand::RngCore;
 use regex::Regex;
 use std::collections::BTreeSet;
 use std::collections::HashMap;
@@ -213,13 +211,6 @@ pub(crate) fn current_time_secs_f64() -> f64 {
         .duration_since(std::time::UNIX_EPOCH)
         .expect("system time before UNIX EPOCH")
         .as_secs_f64()
-}
-
-pub(crate) fn new_master_replid() -> String {
-    let mut rnd = rng();
-    let mut bytes: [u8; 20] = [0; 20];
-    rnd.fill_bytes(&mut bytes);
-    bytes.map(|b| format!("{:x}", b)).join("")
 }
 
 pub(crate) struct PatternMatcher {

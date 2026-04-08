@@ -314,6 +314,17 @@ impl Engine {
                     )
                     .await
                     .context("write-simple-value-back-to-stream")?;
+            } else if command.is_watch() {
+                stream_reader
+                    .get_mut()
+                    .write_all(
+                        &RespValue::SimpleError(
+                            "ERR WATCH inside MULTI is not allowed".to_string(),
+                        )
+                        .serialize(),
+                    )
+                    .await
+                    .context("write-simple-value-back-to-stream")?;
             } else {
                 {
                     let mut transaction_store = self.transaction_store.lock().await;
@@ -879,7 +890,7 @@ impl Engine {
                 ),
             },
 
-            Command::Watch(keys) => RespValue::SimpleString("OK".into()),
+            Command::Watch(_keys) => RespValue::SimpleString("OK".into()),
 
             Command::Unknown(msg) => {
                 RespValue::SimpleError(format!("Unrecognized command: {}", msg))
