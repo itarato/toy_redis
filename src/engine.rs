@@ -57,6 +57,7 @@ pub(crate) struct Engine {
     subscription_notify: Notify,
     users: RwLock<HashMap<String, User>>,
     authentications: RwLock<HashMap<u64, String>>,
+    watched: Mutex<HashSet<String>>,
 }
 
 impl Engine {
@@ -89,6 +90,7 @@ impl Engine {
             subscription_notify: Notify::new(),
             users: RwLock::new(HashMap::new()),
             authentications: RwLock::new(HashMap::new()),
+            watched: Mutex::new(HashSet::new()),
         }
     }
 
@@ -304,6 +306,7 @@ impl Engine {
             return Ok(());
         }
 
+        // TODO: This condition tree is messy. Refactor it.
         if !command.is_exec() && !command.is_discard() && self.is_transaction(request_count).await {
             if command.is_multi() {
                 stream_reader
@@ -890,7 +893,14 @@ impl Engine {
                 ),
             },
 
-            Command::Watch(_keys) => RespValue::SimpleString("OK".into()),
+            Command::Watch(keys) => {
+                let mut watched = self.watched.lock().await;
+                for key in keys {
+                    watched.insert(key.clone());
+                }
+
+                RespValue::SimpleString("OK".into())
+            }
 
             Command::Unknown(msg) => {
                 RespValue::SimpleError(format!("Unrecognized command: {}", msg))
