@@ -613,6 +613,12 @@ impl CommandParser {
                         ));
                     }
 
+                    if name.to_lowercase() == "watch" {
+                        let items_len = items.len();
+                        let keys = Self::get_strings_exact(items, items_len, "watch")?;
+                        return Ok(Command::Watch(keys));
+                    }
+
                     return Ok(Command::Unknown(name.to_lowercase()));
                 } else {
                     return Ok(Command::Unknown("not-a-string".to_string()));

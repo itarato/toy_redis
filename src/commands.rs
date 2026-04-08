@@ -71,6 +71,7 @@ pub(crate) enum Command {
     AclGetuser(String /* User */),
     AclSetuser(String /* User */, String /* Password */),
     Auth(String /* User */, String /* Password */),
+    Watch(Vec<String> /* Keys */),
     // ---
     Unknown(String),
 }
@@ -174,6 +175,7 @@ impl Command {
             Command::AclGetuser(_) => false,
             Command::AclSetuser(_, _) => false,
             Command::Auth(_, _) => false,
+            Command::Watch(_) => false,
         }
     }
 
@@ -225,6 +227,7 @@ impl Command {
             Command::AclGetuser(_) => "acl getuser",
             Command::AclSetuser(_, _) => "acl setuser",
             Command::Auth(_, _) => "auth",
+            Command::Watch(_) => "watch",
         }
     }
 

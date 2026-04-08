@@ -879,6 +879,8 @@ impl Engine {
                 ),
             },
 
+            Command::Watch(keys) => RespValue::SimpleString("OK".into()),
+
             Command::Unknown(msg) => {
                 RespValue::SimpleError(format!("Unrecognized command: {}", msg))
             }
