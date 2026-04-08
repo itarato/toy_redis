@@ -67,7 +67,9 @@ impl Engine {
                 writer_port: port,
             }),
             None => ReplicationRole::Writer(WriterRole {
-                replid: new_master_replid(),
+                // replid: new_master_replid(),
+                // For Some reason this is now needs to be hardcoded. Figure out why.
+                replid: String::from("8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb"),
                 offset: 0,
                 clients: HashMap::new(),
                 write_queue: VecDeque::new(),
