@@ -1,6 +1,6 @@
 use std::{
     collections::{HashMap, HashSet, VecDeque},
-    sync::Arc,
+    sync::{atomic::AtomicBool, Arc},
     time::Duration,
 };
 
@@ -57,7 +57,8 @@ pub(crate) struct Engine {
     subscription_notify: Notify,
     users: RwLock<HashMap<String, User>>,
     authentications: RwLock<HashMap<u64, String>>,
-    watched: Mutex<HashSet<String>>,
+    watched: Mutex<HashMap<u64, HashSet<String>>>,
+    watched_touched: AtomicBool,
 }
 
 impl Engine {
@@ -90,7 +91,8 @@ impl Engine {
             subscription_notify: Notify::new(),
             users: RwLock::new(HashMap::new()),
             authentications: RwLock::new(HashMap::new()),
-            watched: Mutex::new(HashSet::new()),
+            watched: Mutex::new(HashMap::new()),
+            watched_touched: AtomicBool::new(false),
         }
     }
 
@@ -576,19 +578,42 @@ impl Engine {
 
                 match transaction_store.remove(&request_count.unwrap()) {
                     Some(commands) => {
-                        let mut subvalues = vec![];
-                        for command in commands {
-                            let subvalue = Box::pin(self.execute_only(
-                                &command,
-                                request_count,
-                                current_offset,
-                            ))
-                            .await?;
-
-                            subvalues.push(subvalue);
+                        let watched;
+                        {
+                            watched = self
+                                .watched
+                                .lock()
+                                .await
+                                .entry(request_count.unwrap())
+                                .or_default()
+                                // Clone to avoid keeping the lock alive.
+                                .clone();
                         }
 
-                        RespValue::Array(subvalues)
+                        let mut cancelled = false;
+                        for command in &commands {
+                            if command.is_updating_key(&watched) {
+                                cancelled = true;
+                                break;
+                            }
+                        }
+
+                        if cancelled {
+                            RespValue::NullArray
+                        } else {
+                            let mut subvalues = vec![];
+                            for command in commands {
+                                let subvalue = Box::pin(self.execute_only(
+                                    &command,
+                                    request_count,
+                                    current_offset,
+                                ))
+                                .await?;
+
+                                subvalues.push(subvalue);
+                            }
+                            RespValue::Array(subvalues)
+                        }
                     }
                     None => RespValue::SimpleError("ERR EXEC without MULTI".to_string()),
                 }
@@ -894,7 +919,8 @@ impl Engine {
             },
 
             Command::Watch(keys) => {
-                let mut watched = self.watched.lock().await;
+                let mut guard = self.watched.lock().await;
+                let watched = guard.entry(request_count.unwrap()).or_default();
                 for key in keys {
                     watched.insert(key.clone());
                 }
