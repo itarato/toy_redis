@@ -588,6 +588,9 @@ impl Engine {
                         {
                             let mut watched_touched = self.watched_touched.lock().await;
                             should_cancel = watched_touched.remove(&request_count.unwrap());
+
+                            // Unwatch.
+                            self.watched.lock().await.remove(&request_count.unwrap());
                         }
 
                         if should_cancel {
@@ -613,6 +616,14 @@ impl Engine {
 
             Command::Discard => {
                 if self.is_transaction(request_count.unwrap()).await {
+                    {
+                        // Unwatch.
+                        self.watched_touched
+                            .lock()
+                            .await
+                            .remove(&request_count.unwrap());
+                        self.watched.lock().await.remove(&request_count.unwrap());
+                    }
                     {
                         let mut transaction_store = self.transaction_store.lock().await;
                         transaction_store.remove(&request_count.unwrap());
@@ -916,6 +927,16 @@ impl Engine {
                 for key in keys {
                     watched.insert(key.clone());
                 }
+
+                RespValue::SimpleString("OK".into())
+            }
+
+            Command::Unwatch => {
+                self.watched.lock().await.remove(&request_count.unwrap());
+                self.watched_touched
+                    .lock()
+                    .await
+                    .remove(&request_count.unwrap());
 
                 RespValue::SimpleString("OK".into())
             }

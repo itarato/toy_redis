@@ -619,6 +619,11 @@ impl CommandParser {
                         return Ok(Command::Watch(keys));
                     }
 
+                    if name.to_lowercase() == "unwatch" {
+                        Self::assert_argument_count(&items, 1, "unwatch")?;
+                        return Ok(Command::Unwatch);
+                    }
+
                     return Ok(Command::Unknown(name.to_lowercase()));
                 } else {
                     return Ok(Command::Unknown("not-a-string".to_string()));
