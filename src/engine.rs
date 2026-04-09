@@ -1,6 +1,6 @@
 use std::{
     collections::{HashMap, HashSet, VecDeque},
-    sync::{atomic::AtomicBool, Arc},
+    sync::Arc,
     time::Duration,
 };
 
@@ -58,7 +58,7 @@ pub(crate) struct Engine {
     users: RwLock<HashMap<String, User>>,
     authentications: RwLock<HashMap<u64, String>>,
     watched: Mutex<HashMap<u64, HashSet<String>>>,
-    watched_touched: AtomicBool,
+    watched_touched: Mutex<HashSet<u64>>,
 }
 
 impl Engine {
@@ -92,7 +92,7 @@ impl Engine {
             users: RwLock::new(HashMap::new()),
             authentications: RwLock::new(HashMap::new()),
             watched: Mutex::new(HashMap::new()),
-            watched_touched: AtomicBool::new(false),
+            watched_touched: Mutex::new(HashSet::new()),
         }
     }
 
@@ -397,6 +397,8 @@ impl Engine {
             Command::Echo(arg) => RespValue::BulkString(arg.clone()),
 
             Command::Set(key, value, expiry) => {
+                self.check_for_watched_keys(key).await;
+
                 match self.db.write().await.set(
                     key.clone(),
                     value.clone(),
@@ -560,10 +562,14 @@ impl Engine {
                 }
             }
 
-            Command::Incr(key) => match self.db.write().await.incr(key) {
-                Ok(n) => RespValue::Integer(n),
-                Err(err) => RespValue::SimpleError(err),
-            },
+            Command::Incr(key) => {
+                self.check_for_watched_keys(key).await;
+
+                match self.db.write().await.incr(key) {
+                    Ok(n) => RespValue::Integer(n),
+                    Err(err) => RespValue::SimpleError(err),
+                }
+            }
 
             Command::Multi => {
                 self.transaction_store
@@ -578,27 +584,13 @@ impl Engine {
 
                 match transaction_store.remove(&request_count.unwrap()) {
                     Some(commands) => {
-                        let watched;
+                        let should_cancel;
                         {
-                            watched = self
-                                .watched
-                                .lock()
-                                .await
-                                .entry(request_count.unwrap())
-                                .or_default()
-                                // Clone to avoid keeping the lock alive.
-                                .clone();
+                            let mut watched_touched = self.watched_touched.lock().await;
+                            should_cancel = watched_touched.remove(&request_count.unwrap());
                         }
 
-                        let mut cancelled = false;
-                        for command in &commands {
-                            if command.is_updating_key(&watched) {
-                                cancelled = true;
-                                break;
-                            }
-                        }
-
-                        if cancelled {
+                        if should_cancel {
                             RespValue::NullArray
                         } else {
                             let mut subvalues = vec![];
@@ -1569,5 +1561,16 @@ impl Engine {
             .get(user)
             .map(|user| vec![user.password_hash()])
             .unwrap_or(vec![])
+    }
+
+    async fn check_for_watched_keys(&self, key: &String) {
+        let mut watched_touched = self.watched_touched.lock().await;
+        let watched = self.watched.lock().await;
+
+        for (req_id, keys) in &*watched {
+            if keys.contains(key) {
+                watched_touched.insert(*req_id);
+            }
+        }
     }
 }

@@ -1,5 +1,3 @@
-use std::collections::HashSet;
-
 use crate::{
     common::{KeyValuePair, RangeStreamEntryID, StreamEntryID},
     resp::RespValue,
@@ -79,14 +77,6 @@ pub(crate) enum Command {
 }
 
 impl Command {
-    pub(crate) fn is_updating_key(&self, keys: &HashSet<String>) -> bool {
-        match self {
-            Self::Set(key, _, _) => keys.contains(key),
-            Self::Incr(key) => keys.contains(key),
-            _ => false, // Not true but we don't need more for now for WATCH checks.
-        }
-    }
-
     pub(crate) fn is_exec(&self) -> bool {
         match self {
             Command::Exec => true,
