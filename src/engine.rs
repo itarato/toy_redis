@@ -113,6 +113,11 @@ impl Engine {
     }
 
     pub(crate) async fn init(&self, server_port: u16) -> Result<(), Error> {
+        if self.is_append_only {
+            let append_dir_path = std::path::PathBuf::from(&self.dir).join(&self.append_dirname);
+            tokio::fs::create_dir_all(&append_dir_path).await?;
+        }
+
         self.reload_from_snapshot().await?;
 
         if self.replication_role.read().await.is_reader() {
