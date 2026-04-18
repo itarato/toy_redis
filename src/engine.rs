@@ -2,6 +2,7 @@ use std::{
     collections::{HashMap, HashSet, VecDeque},
     fs::File,
     io::Write,
+    path::PathBuf,
     sync::Arc,
     time::Duration,
 };
@@ -126,27 +127,6 @@ impl Engine {
         } else {
             Ok(())
         }
-    }
-
-    async fn init_aof_folder(&self) -> Result<(), Error> {
-        let append_dir_path = std::path::PathBuf::from(&self.dir).join(&self.append_dirname);
-        tokio::fs::create_dir_all(&append_dir_path).await?;
-
-        let append_file_name = format!("{}.1.incr.aof", self.append_filename);
-        let append_file_path = append_dir_path.join(append_file_name.clone());
-        tokio::fs::File::create(&append_file_path)
-            .await
-            .context("creating-append-only-file")?;
-
-        let manifest_file_name = format!("{}.manifest", self.append_filename);
-        let manifets_file_path = append_dir_path.join(manifest_file_name);
-        let mut manifest_file = File::create(manifets_file_path).unwrap();
-
-        manifest_file
-            .write_all(format!("file {} seq 1 type i", append_file_name).as_bytes())
-            .unwrap();
-
-        Ok(())
     }
 
     async fn reload_from_snapshot(&self) -> Result<(), Error> {
@@ -434,6 +414,10 @@ impl Engine {
         request_count: Option<u64>,
         current_offset: usize,
     ) -> Result<RespValue, Error> {
+        if command.for_replication() && self.is_append_only {
+            self.sync_command_to_aof(command);
+        }
+
         let value = match command {
             Command::Ping => RespValue::SimpleString("PONG".to_string()),
 
@@ -1652,5 +1636,47 @@ impl Engine {
                 watched_touched.insert(*req_id);
             }
         }
+    }
+
+    async fn init_aof_folder(&self) -> Result<(), Error> {
+        let append_dir_path = std::path::PathBuf::from(&self.dir).join(&self.append_dirname);
+        tokio::fs::create_dir_all(&append_dir_path).await?;
+
+        let append_file_name = format!("{}.1.incr.aof", self.append_filename);
+        let append_file_path = append_dir_path.join(append_file_name.clone());
+        tokio::fs::File::create(&append_file_path)
+            .await
+            .context("creating-append-only-file")?;
+
+        let mut manifest_file = File::create(self.manifest_file_path()).unwrap();
+
+        manifest_file
+            .write_all(format!("file {} seq 1 type i", append_file_name).as_bytes())
+            .unwrap();
+
+        Ok(())
+    }
+
+    fn manifest_file_path(&self) -> PathBuf {
+        let append_dir_path = std::path::PathBuf::from(&self.dir).join(&self.append_dirname);
+        let manifest_file_name = format!("{}.manifest", self.append_filename);
+        append_dir_path.join(manifest_file_name)
+    }
+
+    fn current_aof_file_path(&self) -> PathBuf {
+        let manifest = std::fs::read_to_string(self.manifest_file_path()).unwrap();
+        let parts = manifest.split(' ').collect::<Vec<_>>();
+        let file_name = parts[1].to_string();
+        let append_dir_path = std::path::PathBuf::from(&self.dir).join(&self.append_dirname);
+        append_dir_path.join(file_name.clone())
+    }
+
+    fn sync_command_to_aof(&self, command: &Command) {
+        let mut aof = File::options()
+            .append(true)
+            .open(self.current_aof_file_path())
+            .unwrap();
+
+        aof.write_all(&command.into_resp().serialize()).unwrap();
     }
 }
