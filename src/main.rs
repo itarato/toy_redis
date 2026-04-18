@@ -26,8 +26,8 @@ struct Args {
     #[arg(long)]
     replicaof: Option<String>,
 
-    #[arg(long, default_value_t = String::from("/tmp/redis-files"))]
-    dir: String,
+    #[arg(long)]
+    dir: Option<String>,
 
     #[arg(long, default_value_t = String::from("dump.rdb"))]
     dbfilename: String,
@@ -59,7 +59,13 @@ async fn main() -> Result<(), Error> {
     let server = Server::new(
         args.port,
         args.parsed_replica_of(),
-        args.dir,
+        args.dir.unwrap_or(
+            std::env::current_dir()?
+                .as_os_str()
+                .to_str()
+                .unwrap()
+                .to_string(),
+        ),
         args.dbfilename,
     );
     server.run().await?;
