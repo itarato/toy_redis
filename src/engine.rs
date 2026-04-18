@@ -738,6 +738,18 @@ impl Engine {
                     } else if matcher.is_match("dbfilename") {
                         values.push(RespValue::BulkString("dbfilename".into()));
                         values.push(RespValue::BulkString(self.dbfilename.clone()));
+                    } else if matcher.is_match("appendonly") {
+                        values.push(RespValue::BulkString("appendonly".to_string()));
+                        values.push(RespValue::BulkString("no".to_string()));
+                    } else if matcher.is_match("appenddirname") {
+                        values.push(RespValue::BulkString("appenddirname".to_string()));
+                        values.push(RespValue::BulkString("appendonlydir".to_string()));
+                    } else if matcher.is_match("appendfilename") {
+                        values.push(RespValue::BulkString("appendfilename".to_string()));
+                        values.push(RespValue::BulkString("appendonly.aof".to_string()));
+                    } else if matcher.is_match("appendfsync") {
+                        values.push(RespValue::BulkString("appendfsync".to_string()));
+                        values.push(RespValue::BulkString("everysec".to_string()));
                     } else {
                         error!("Unrecognized get parameter: {}", param);
                     }
