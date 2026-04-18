@@ -31,6 +31,18 @@ struct Args {
 
     #[arg(long, default_value_t = String::from("dump.rdb"))]
     dbfilename: String,
+
+    #[arg(long, default_value_t = String::from("no"))]
+    appendonly: String,
+
+    #[arg(long, default_value_t = String::from("appendonlydir"))]
+    appenddirname: String,
+
+    #[arg(long, default_value_t = String::from("appendonly.aof"))]
+    appendfilename: String,
+
+    #[arg(long, default_value_t = String::from("everysec"))]
+    appendfsync: String,
 }
 
 impl Args {
@@ -44,6 +56,10 @@ impl Args {
             let replica_port = u16::from_str_radix(parts[1], 10).expect("port from argument");
             (parts[0].to_string(), replica_port)
         })
+    }
+
+    fn is_append_only(&self) -> bool {
+        &self.appendonly == "yes"
     }
 }
 
@@ -59,14 +75,18 @@ async fn main() -> Result<(), Error> {
     let server = Server::new(
         args.port,
         args.parsed_replica_of(),
-        args.dir.unwrap_or(
+        args.dir.clone().unwrap_or(
             std::env::current_dir()?
                 .as_os_str()
                 .to_str()
                 .unwrap()
                 .to_string(),
         ),
-        args.dbfilename,
+        args.dbfilename.clone(),
+        args.is_append_only(),
+        args.appenddirname,
+        args.appendfilename,
+        args.appendfsync,
     );
     server.run().await?;
 

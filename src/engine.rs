@@ -48,6 +48,10 @@ pub(crate) struct Engine {
     db: RwLock<Database>,
     dir: String,
     dbfilename: String,
+    is_append_only: bool,
+    append_dirname: String,
+    append_filename: String,
+    append_fsync: String,
     transaction_store: Mutex<HashMap<u64, Vec<Command>>>,
     replication_role: RwLock<ReplicationRole>,
     stream_notify: Arc<Notify>,
@@ -62,7 +66,15 @@ pub(crate) struct Engine {
 }
 
 impl Engine {
-    pub(crate) fn new(replica_of: Option<(String, u16)>, dir: String, dbfilename: String) -> Self {
+    pub(crate) fn new(
+        replica_of: Option<(String, u16)>,
+        dir: String,
+        dbfilename: String,
+        is_append_only: bool,
+        append_dirname: String,
+        append_filename: String,
+        append_fsync: String,
+    ) -> Self {
         let replication_role = match replica_of {
             Some((host, port)) => ReplicationRole::Reader(ReaderRole {
                 writer_host: host,
@@ -82,6 +94,10 @@ impl Engine {
             db: RwLock::new(Database::new()),
             dir,
             dbfilename,
+            is_append_only,
+            append_dirname,
+            append_filename,
+            append_fsync,
             stream_notify: Arc::new(Notify::new()),
             transaction_store: Mutex::new(HashMap::new()),
             replication_role: RwLock::new(replication_role),
@@ -740,16 +756,20 @@ impl Engine {
                         values.push(RespValue::BulkString(self.dbfilename.clone()));
                     } else if matcher.is_match("appendonly") {
                         values.push(RespValue::BulkString("appendonly".to_string()));
-                        values.push(RespValue::BulkString("no".to_string()));
+                        values.push(RespValue::BulkString(if self.is_append_only {
+                            "yes".to_string()
+                        } else {
+                            "no".to_string()
+                        }));
                     } else if matcher.is_match("appenddirname") {
                         values.push(RespValue::BulkString("appenddirname".to_string()));
-                        values.push(RespValue::BulkString("appendonlydir".to_string()));
+                        values.push(RespValue::BulkString(self.append_dirname.clone()));
                     } else if matcher.is_match("appendfilename") {
                         values.push(RespValue::BulkString("appendfilename".to_string()));
-                        values.push(RespValue::BulkString("appendonly.aof".to_string()));
+                        values.push(RespValue::BulkString(self.append_filename.clone()));
                     } else if matcher.is_match("appendfsync") {
                         values.push(RespValue::BulkString("appendfsync".to_string()));
-                        values.push(RespValue::BulkString("everysec".to_string()));
+                        values.push(RespValue::BulkString(self.append_fsync.clone()));
                     } else {
                         error!("Unrecognized get parameter: {}", param);
                     }

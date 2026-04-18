@@ -23,9 +23,21 @@ impl Server {
         replica_of: Option<(String, u16)>,
         dir: String,
         dbfilename: String,
+        is_append_only: bool,
+        append_dirname: String,
+        append_filename: String,
+        append_fsync: String,
     ) -> Self {
         Self {
-            engine: Arc::new(Engine::new(replica_of, dir, dbfilename)),
+            engine: Arc::new(Engine::new(
+                replica_of,
+                dir,
+                dbfilename,
+                is_append_only,
+                append_dirname,
+                append_filename,
+                append_fsync,
+            )),
             request_counter: Cell::new(0),
             port,
         }
