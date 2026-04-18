@@ -1,7 +1,7 @@
 use std::{
     collections::{HashMap, HashSet, VecDeque},
     fs::File,
-    io::Write,
+    io::{BufRead, Write},
     path::PathBuf,
     sync::Arc,
     time::Duration,
@@ -21,7 +21,7 @@ use crate::{
     commands::Command,
     common::*,
     database::{Database, StreamEntry},
-    network::StreamReader,
+    network::{StreamReader, TcpStreamReader},
     rdb::{RdbFile, RdbValue},
     resp::RespValue,
 };
@@ -194,7 +194,7 @@ impl Engine {
             .connect(socket_addr)
             .await
             .context("connecting-to-writer")?;
-        let mut stream_reader = StreamReader::new(&mut stream);
+        let mut stream_reader = StreamReader::from_tcp_stream(&mut stream);
 
         self.replica_handshake(server_port, &mut stream_reader)
             .await?;
@@ -208,7 +208,7 @@ impl Engine {
 
     async fn listen_for_replication_updates(
         &self,
-        stream_reader: &mut StreamReader<'_>,
+        stream_reader: &mut StreamReader<TcpStreamReader<'_>>,
     ) -> Result<(), Error> {
         loop {
             debug!("Start waiting for replication input");
@@ -221,7 +221,7 @@ impl Engine {
                         self.execute_and_reply(&command, None, stream_reader)
                             .await?;
                     } else {
-                        self.execute_only(&command, None, stream_reader.byte_count)
+                        self.execute_only(&command, None, stream_reader.byte_count, true)
                             .await?;
                     }
 
@@ -238,7 +238,7 @@ impl Engine {
     async fn replica_handshake(
         &self,
         server_port: u16,
-        stream_reader: &mut StreamReader<'_>,
+        stream_reader: &mut StreamReader<TcpStreamReader<'_>>,
     ) -> Result<(), Error> {
         Self::handshake_step(
             stream_reader,
@@ -319,7 +319,7 @@ impl Engine {
         &self,
         command: &Command,
         request_count: u64,
-        stream_reader: &mut StreamReader<'_>,
+        stream_reader: &mut StreamReader<TcpStreamReader<'_>>,
     ) -> Result<(), Error> {
         if !self.ensure_auth(request_count, command).await {
             stream_reader
@@ -385,10 +385,10 @@ impl Engine {
         &self,
         command: &Command,
         request_count: Option<u64>,
-        stream_reader: &mut StreamReader<'_>,
+        stream_reader: &mut StreamReader<TcpStreamReader<'_>>,
     ) -> Result<(), Error> {
         let response_value = self
-            .execute_only(command, request_count, stream_reader.byte_count)
+            .execute_only(command, request_count, stream_reader.byte_count, true)
             .await?;
 
         debug!(
@@ -413,8 +413,9 @@ impl Engine {
         command: &Command,
         request_count: Option<u64>,
         current_offset: usize,
+        should_sync_to_aof: bool,
     ) -> Result<RespValue, Error> {
-        if command.for_replication() && self.is_append_only {
+        if should_sync_to_aof && command.for_replication() && self.is_append_only {
             self.sync_command_to_aof(command);
         }
 
@@ -629,6 +630,7 @@ impl Engine {
                                     &command,
                                     request_count,
                                     current_offset,
+                                    true,
                                 ))
                                 .await?;
 
@@ -1080,7 +1082,7 @@ impl Engine {
 
     async fn subscribe(
         &self,
-        stream_reader: &mut StreamReader<'_>,
+        stream_reader: &mut StreamReader<TcpStreamReader<'_>>,
         command: &Command,
         request_count: u64,
     ) -> Result<(), Error> {
@@ -1269,7 +1271,7 @@ impl Engine {
     }
 
     async fn handshake_step(
-        stream_reader: &mut StreamReader<'_>,
+        stream_reader: &mut StreamReader<TcpStreamReader<'_>>,
         payload: RespValue,
         expected_response: RespValue,
     ) -> Result<(), Error> {
@@ -1291,7 +1293,7 @@ impl Engine {
 
     async fn handle_replica_connection(
         &self,
-        stream_reader: &mut StreamReader<'_>,
+        stream_reader: &mut StreamReader<TcpStreamReader<'_>>,
         request_count: u64,
         command: &Command,
     ) -> Result<(), Error> {
@@ -1423,6 +1425,7 @@ impl Engine {
                                     &command,
                                     Some(request_count),
                                     stream_reader.byte_count,
+                                    true,
                                 )
                                 .await?;
                             }
@@ -1488,7 +1491,7 @@ impl Engine {
 
     async fn subscription_handle_incoming_commands(
         &self,
-        stream_reader: &mut StreamReader<'_>,
+        stream_reader: &mut StreamReader<TcpStreamReader<'_>>,
         request_count: u64,
     ) -> Result<bool /* should the sub finish */, Error> {
         let incoming = stream_reader
@@ -1576,7 +1579,7 @@ impl Engine {
 
     async fn subscription_handle_publishing(
         &self,
-        stream_reader: &mut StreamReader<'_>,
+        stream_reader: &mut StreamReader<TcpStreamReader<'_>>,
         request_count: u64,
     ) -> Result<(), Error> {
         let mut channel_messages: HashMap<String, Vec<String>> = HashMap::new();
@@ -1644,17 +1647,45 @@ impl Engine {
 
         let append_file_name = format!("{}.1.incr.aof", self.append_filename);
         let append_file_path = append_dir_path.join(append_file_name.clone());
-        tokio::fs::File::create(&append_file_path)
-            .await
-            .context("creating-append-only-file")?;
 
-        let mut manifest_file = File::create(self.manifest_file_path()).unwrap();
+        if !append_file_path.exists() {
+            tokio::fs::File::create(&append_file_path)
+                .await
+                .context("creating-append-only-file")?;
+        }
 
-        manifest_file
-            .write_all(format!("file {} seq 1 type i", append_file_name).as_bytes())
-            .unwrap();
+        if !self.manifest_file_path().exists() {
+            let mut manifest_file = File::create(self.manifest_file_path()).unwrap();
+            manifest_file
+                .write_all(format!("file {} seq 1 type i", append_file_name).as_bytes())
+                .unwrap();
+            manifest_file
+                .write_all(format!("file {} seq 1 type i", append_file_name).as_bytes())
+                .unwrap();
+        }
+
+        self.aof_replay().await;
 
         Ok(())
+    }
+
+    async fn aof_replay(&self) {
+        for aof_file_path in self.aof_file_paths() {
+            let aof_file = tokio::fs::File::open(aof_file_path).await.unwrap();
+            let mut stream_reader = StreamReader::from_file(aof_file);
+
+            while let Ok(Some(resp)) = stream_reader.read_resp_value_from_buf_reader(None).await {
+                match CommandParser::parse(resp) {
+                    Ok(command) => {
+                        self.execute_only(&command, None, 0, false).await.unwrap();
+                    }
+                    Err(err) => {
+                        error!("Error when reading commands for replay: {:?}", err);
+                        break;
+                    }
+                }
+            }
+        }
     }
 
     fn manifest_file_path(&self) -> PathBuf {
@@ -1663,12 +1694,33 @@ impl Engine {
         append_dir_path.join(manifest_file_name)
     }
 
+    fn aof_file_paths(&self) -> Vec<PathBuf> {
+        let manifest_file = File::open(self.manifest_file_path()).unwrap();
+        let mut reader = std::io::BufReader::new(manifest_file);
+        let mut out = vec![];
+
+        loop {
+            let mut line = String::new();
+            let read_len = reader.read_line(&mut line).unwrap();
+
+            if read_len == 0 {
+                break;
+            }
+
+            let parts = line.split(' ').collect::<Vec<_>>();
+            let file_name = parts[1].to_string();
+            let append_dir_path = std::path::PathBuf::from(&self.dir).join(&self.append_dirname);
+
+            out.push(append_dir_path.join(file_name.clone()));
+        }
+
+        out
+    }
+
     fn current_aof_file_path(&self) -> PathBuf {
-        let manifest = std::fs::read_to_string(self.manifest_file_path()).unwrap();
-        let parts = manifest.split(' ').collect::<Vec<_>>();
-        let file_name = parts[1].to_string();
         let append_dir_path = std::path::PathBuf::from(&self.dir).join(&self.append_dirname);
-        append_dir_path.join(file_name.clone())
+        let append_file_name = format!("{}.1.incr.aof", self.append_filename);
+        append_dir_path.join(append_file_name.clone())
     }
 
     fn sync_command_to_aof(&self, command: &Command) {

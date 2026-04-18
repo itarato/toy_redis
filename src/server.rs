@@ -83,7 +83,7 @@ impl Server {
         engine.connection_established(request_count).await;
 
         loop {
-            let mut stream_reader = StreamReader::new(&mut stream);
+            let mut stream_reader = StreamReader::from_tcp_stream(&mut stream);
             match stream_reader
                 .read_resp_value_from_buf_reader(Some(request_count))
                 .await?

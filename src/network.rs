@@ -1,28 +1,93 @@
+use crate::{common::Error, resp::RespValue};
 use anyhow::Context;
 use tokio::{
+    fs::File,
     io::{AsyncBufReadExt, AsyncReadExt, BufReader},
     net::TcpStream,
 };
 
-use crate::{common::Error, resp::RespValue};
+pub(crate) trait Reader {
+    async fn read_line(&mut self, buf: &mut String) -> Result<usize, Error>;
+    async fn read_exact(&mut self, buf: &mut [u8]) -> Result<usize, Error>;
+}
 
-pub(crate) struct StreamReader<'a> {
+pub struct TcpStreamReader<'a> {
     buf_reader: BufReader<&'a mut TcpStream>,
+}
+
+impl<'a> TcpStreamReader<'a> {
+    pub(crate) fn new(tcp_stream: &'a mut TcpStream) -> Self {
+        Self {
+            buf_reader: BufReader::new(tcp_stream),
+        }
+    }
+
+    fn get_mut(&mut self) -> &mut TcpStream {
+        self.buf_reader.get_mut()
+    }
+}
+
+impl<'a> Reader for TcpStreamReader<'a> {
+    async fn read_line(&mut self, buf: &mut String) -> Result<usize, Error> {
+        self.buf_reader.read_line(buf).await.map_err(|e| e.into())
+    }
+
+    async fn read_exact(&mut self, buf: &mut [u8]) -> Result<usize, Error> {
+        self.buf_reader.read_exact(buf).await.map_err(|e| e.into())
+    }
+}
+
+pub(crate) struct FileReader {
+    buf_reader: BufReader<File>,
+}
+
+impl FileReader {
+    fn new(file: File) -> Self {
+        Self {
+            buf_reader: BufReader::new(file),
+        }
+    }
+}
+
+impl Reader for FileReader {
+    async fn read_line(&mut self, buf: &mut String) -> Result<usize, Error> {
+        self.buf_reader.read_line(buf).await.map_err(|e| e.into())
+    }
+
+    async fn read_exact(&mut self, buf: &mut [u8]) -> Result<usize, Error> {
+        self.buf_reader.read_exact(buf).await.map_err(|e| e.into())
+    }
+}
+
+pub(crate) struct StreamReader<R: Reader> {
+    reader: R,
     uncommitted_byte_count: usize,
     pub(crate) byte_count: usize,
 }
 
-impl<'a> StreamReader<'a> {
-    pub(crate) fn new(stream: &'a mut TcpStream) -> Self {
-        Self {
-            buf_reader: BufReader::new(stream),
-            uncommitted_byte_count: 0,
-            byte_count: 0,
-        }
+impl<'a> StreamReader<TcpStreamReader<'a>> {
+    pub(crate) fn from_tcp_stream(stream: &'a mut TcpStream) -> StreamReader<TcpStreamReader<'a>> {
+        Self::new(TcpStreamReader::new(stream))
     }
 
     pub(crate) fn get_mut(&mut self) -> &mut TcpStream {
-        self.buf_reader.get_mut()
+        self.reader.get_mut()
+    }
+}
+
+impl StreamReader<FileReader> {
+    pub(crate) fn from_file(file: File) -> StreamReader<FileReader> {
+        Self::new(FileReader::new(file))
+    }
+}
+
+impl<R: Reader> StreamReader<R> {
+    pub(crate) fn new(reader: R) -> Self {
+        Self {
+            reader,
+            uncommitted_byte_count: 0,
+            byte_count: 0,
+        }
     }
 
     pub(crate) fn reset_byte_counter(&mut self) {
@@ -97,10 +162,7 @@ impl<'a> StreamReader<'a> {
         request_count: Option<u64>,
     ) -> Result<String, Error> {
         let mut buf = String::new();
-        self.buf_reader.read_line(&mut buf).await.context(format!(
-            "reading-line-from-tcpstream-req{:?}",
-            request_count
-        ))?;
+        self.reader.read_line(&mut buf).await?;
         self.uncommitted_byte_count += buf.len();
 
         debug!(
@@ -118,10 +180,7 @@ impl<'a> StreamReader<'a> {
         request_count: Option<u64>,
     ) -> Result<Vec<u8>, Error> {
         let mut size_raw = String::new();
-        self.buf_reader
-            .read_line(&mut size_raw)
-            .await
-            .context("read-bulk-bytes-size")?;
+        self.reader.read_line(&mut size_raw).await?;
         self.uncommitted_byte_count += size_raw.len();
 
         let size_raw = size_raw.trim_end();
@@ -139,11 +198,7 @@ impl<'a> StreamReader<'a> {
 
         let mut buf = Vec::with_capacity(size);
         buf.resize(size, 0);
-        let read_size = self
-            .buf_reader
-            .read_exact(&mut buf[0..size])
-            .await
-            .context(format!("reading-bulk-bytes-with-len-{}", size))?;
+        let read_size = self.reader.read_exact(&mut buf[0..size]).await?;
         self.uncommitted_byte_count += read_size;
 
         if read_size != size {
