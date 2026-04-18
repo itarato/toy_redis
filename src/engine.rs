@@ -1,5 +1,7 @@
 use std::{
     collections::{HashMap, HashSet, VecDeque},
+    fs::File,
+    io::Write,
     sync::Arc,
     time::Duration,
 };
@@ -114,14 +116,7 @@ impl Engine {
 
     pub(crate) async fn init(&self, server_port: u16) -> Result<(), Error> {
         if self.is_append_only {
-            let append_dir_path = std::path::PathBuf::from(&self.dir).join(&self.append_dirname);
-            tokio::fs::create_dir_all(&append_dir_path).await?;
-
-            let filename = format!("{}.1.incr.aof", self.append_filename);
-            let append_file_path = append_dir_path.join(filename);
-            tokio::fs::File::create(&append_file_path)
-                .await
-                .context("creating-append-only-file")?;
+            self.init_aof_folder().await?;
         }
 
         self.reload_from_snapshot().await?;
@@ -131,6 +126,27 @@ impl Engine {
         } else {
             Ok(())
         }
+    }
+
+    async fn init_aof_folder(&self) -> Result<(), Error> {
+        let append_dir_path = std::path::PathBuf::from(&self.dir).join(&self.append_dirname);
+        tokio::fs::create_dir_all(&append_dir_path).await?;
+
+        let append_file_name = format!("{}.1.incr.aof", self.append_filename);
+        let append_file_path = append_dir_path.join(append_file_name.clone());
+        tokio::fs::File::create(&append_file_path)
+            .await
+            .context("creating-append-only-file")?;
+
+        let manifest_file_name = format!("{}.manifest", self.append_filename);
+        let manifets_file_path = append_dir_path.join(manifest_file_name);
+        let mut manifest_file = File::create(manifets_file_path).unwrap();
+
+        manifest_file
+            .write_all(format!("file {} seq 1 type i", append_file_name).as_bytes())
+            .unwrap();
+
+        Ok(())
     }
 
     async fn reload_from_snapshot(&self) -> Result<(), Error> {
