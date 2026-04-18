@@ -116,6 +116,12 @@ impl Engine {
         if self.is_append_only {
             let append_dir_path = std::path::PathBuf::from(&self.dir).join(&self.append_dirname);
             tokio::fs::create_dir_all(&append_dir_path).await?;
+
+            let filename = format!("{}.1.incr.aof", self.append_filename);
+            let append_file_path = append_dir_path.join(filename);
+            tokio::fs::File::create(&append_file_path)
+                .await
+                .context("creating-append-only-file")?;
         }
 
         self.reload_from_snapshot().await?;
